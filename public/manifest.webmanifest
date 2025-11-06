@@ -1,0 +1,12 @@
+{
+    "name": "Facturador",
+    "short_name": "Facturador",
+    "description": "Tu contabilidad, simplificada.",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#2fca6c",
+    "icons": [
+        { "src": "/favicon.ico", "sizes": "48x48", "type": "image/x-icon" }
+    ]
+}

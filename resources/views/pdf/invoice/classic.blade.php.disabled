@@ -1,0 +1,49 @@
+{{-- resources/views/pdf/invoice/classic.blade.php --}}
+@php($doc = $invoice)
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>{{ $invoice->number }}</title>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: DejaVu Sans, sans-serif; font-size: 12px; color:#111; }
+        .w-100{ width:100%; }
+        .text-right{ text-align:right; }
+        .text-left{ text-align:left; }
+        .muted{ color:#666; }
+        .small{ font-size: 11px; }
+        header{ margin-bottom: 16px; }
+        .items-table th, .items-table td { padding:6px 8px; border-bottom:1px solid #e5e7eb; }
+        .items-table thead th { border-bottom:2px solid #111; text-transform:uppercase; font-size:11px; letter-spacing:.02em; }
+        .totals-table { margin-top: 12px; }
+        .totals-table td { padding:6px 8px; }
+        .totals-table .label { width:70%; }
+        .grand-total .value{ font-weight:700; font-size: 14px; }
+        .notes{ margin-top:14px; }
+        .note-block{ margin-top:10px; }
+        .note-title{ font-weight:700; margin-bottom:4px; }
+        .badge{ display:inline-block; padding:2px 8px; border:1px solid #111; border-radius:10px; font-size:11px; }
+        .logo{ max-height: 54px; }
+        .grid { display: table; width:100%; }
+        .col { display: table-cell; vertical-align: top; }
+        .col-7{ width: 70%; }
+        .col-5{ width: 30%; }
+    </style>
+</head>
+<body>
+
+    @include('pdf.partials.header', ['invoice' => $invoice])
+
+    @include('pdf.partials.client_box', ['invoice' => $invoice ?? null, 'budget' => $budget ?? null])
+
+    @include('pdf.partials.items', ['invoice' => $invoice])
+
+    @include('pdf.partials.totals', ['invoice' => $invoice])
+
+    @include('pdf.partials.notes', ['invoice' => $invoice])
+
+    @include('pdf.partials.signatures', ['invoice' => $invoice ?? null, 'budget' => $budget ?? null])
+
+</body>
+</html>
