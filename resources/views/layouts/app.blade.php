@@ -133,6 +133,9 @@
         </div>
     </main>
 
+    @include('partials.flash')
+    
+
     <footer class="mt-auto py-4 bg-white border-top">
         <div class="container-xxl d-flex flex-column flex-md-row align-items-center justify-content-between">
             <div class="d-flex align-items-center">

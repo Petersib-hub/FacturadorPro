@@ -11,6 +11,10 @@
 </style>
 @endpush
 
+@includeIf('verifactu._status_badge', ['invoice' => $invoice])
+@includeIf('verifactu._qr', ['invoice' => $invoice])
+
+
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0">Factura {{ $invoice->number }}</h4>

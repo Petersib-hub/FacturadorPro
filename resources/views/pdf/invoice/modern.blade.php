@@ -2,56 +2,129 @@
 @php($doc = $invoice)
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="utf-8">
     <title>{{ $invoice->number }}</title>
     <style>
-        body { font-family: DejaVu Sans, sans-serif; font-size: 12px; color: #0f172a; }
-        header { margin-bottom: 14px; }
-        .w-100 { width:100%; }
-        .text-right { text-align:right; }
-        .text-left { text-align:left; }
+        body {
+            font-family: DejaVu Sans, sans-serif;
+            font-size: 12px;
+            color: #0f172a;
+        }
+
+        header {
+            margin-bottom: 14px;
+        }
+
+        .w-100 {
+            width: 100%;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-left {
+            text-align: left;
+        }
 
         /* ====== Tabla de ítems segura ====== */
-        .items-table { table-layout: fixed; width:100%; border-collapse: collapse; }
-        .items-table th, .items-table td {
+        .items-table {
+            table-layout: fixed;
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .items-table th,
+        .items-table td {
             padding: 6px 8px;
             border-bottom: 1px solid #cbd5e1;
             vertical-align: top;
         }
+
         .items-table thead th {
             background: #f1f5f9;
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: .03em;
         }
-        .items-table .th-desc, .items-table .td-desc {
+
+        .items-table .th-desc,
+        .items-table .td-desc {
             white-space: pre-wrap;
             word-break: break-word;
             overflow-wrap: anywhere;
         }
-        .items-table .th-num, .items-table .td-num {
+
+        .items-table .th-num,
+        .items-table .td-num {
             text-align: right;
             white-space: nowrap;
         }
 
-        .totals-table { margin-top: 12px; }
-        .totals-table .grand-total .value { font-size: 15px; font-weight: 800; }
+        .totals-table {
+            margin-top: 12px;
+        }
 
-        .notes { margin-top: 12px; }
-        .badge { display:inline-block; padding:3px 10px; border-radius:9999px; border:1px solid #0f172a; font-size:11px; }
-        .muted { color:#64748b; }
-        .small { font-size:11px; }
-        .logo { max-height:56px; }
+        .totals-table .grand-total .value {
+            font-size: 15px;
+            font-weight: 800;
+        }
 
-        .grid { display: table; width: 100%; }
-        .col { display: table-cell; vertical-align: top; }
-        .col-7 { width: 70%; }
-        .col-5 { width: 30%; }
+        .notes {
+            margin-top: 12px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 9999px;
+            border: 1px solid #0f172a;
+            font-size: 11px;
+        }
+
+        .muted {
+            color: #64748b;
+        }
+
+        .small {
+            font-size: 11px;
+        }
+
+        .logo {
+            max-height: 56px;
+        }
+
+        .grid {
+            display: table;
+            width: 100%;
+        }
+
+        .col {
+            display: table-cell;
+            vertical-align: top;
+        }
+
+        .col-7 {
+            width: 70%;
+        }
+
+        .col-5 {
+            width: 30%;
+        }
     </style>
 </head>
+
 <body>
     @include('pdf.partials.header', ['invoice' => $invoice])
+
+    @if(!empty($invoice->verification_qr))
+        <div style="width:140px; margin-top:10px;">
+            {!! $invoice->verification_qr !!}
+        </div>
+    @endif
+
     @include('pdf.partials.client_box', ['invoice' => $invoice ?? null, 'budget' => $budget ?? null])
 
     {{-- Ítems con estilos anti-desbordes --}}
@@ -61,4 +134,5 @@
     @include('pdf.partials.notes', ['invoice' => $invoice])
     @include('pdf.partials.signatures', ['invoice' => $invoice ?? null, 'budget' => $budget ?? null])
 </body>
+
 </html>

@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class BudgetController extends Controller
 {
@@ -67,26 +68,67 @@ class BudgetController extends Controller
     {
         $validated = $request->validated();
 
-        return DB::transaction(function () use ($validated) {
-            $number = NumberSequence::next('budget', auth()->id()); // PRES-YYYY-####
-            preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m);
-            $year     = (int)($m[1] ?? now()->year);
-            $sequence = (int)($m[2] ?? 0);
+        // Defaults seguros
+        $validated['currency'] = $validated['currency'] ?? 'EUR';
+        $validated['status']   = 'draft';
+        $validated['date']     = $validated['date'] ?? now()->toDateString();
+        $validated['due_date'] = $validated['due_date'] ?? now()->addDays(14)->toDateString();
 
-            $budget = Budget::create([
+        return DB::transaction(function () use ($validated) {
+            // Si existe NumberSequence, generamos número atómico aquí; si no, dejar que el modelo lo haga.
+            $number = null;
+            $year = (int) (date('Y', strtotime($validated['date'])));
+            $sequence = null;
+
+            if (class_exists(NumberSequence::class)) {
+                $number = NumberSequence::next('budget', auth()->id()); // PRES-YYYY-####
+                if (preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m)) {
+                    $year     = (int)($m[1] ?? $year);
+                    $sequence = (int)($m[2] ?? 0);
+                }
+            }
+
+            $data = [
                 'user_id'      => auth()->id(),
                 'client_id'    => $validated['client_id'],
-                'number'       => $number,
-                'sequence'     => $sequence,
+                'number'       => $number,   // si es null, el modelo lo genera en booted()
+                'sequence'     => $sequence, // puede quedar null; booted() lo completa
                 'year'         => $year,
-                'date'         => $validated['date'] ?? now()->toDateString(),
-                'due_date'     => $validated['due_date'] ?? null,
-                'currency'     => $validated['currency'] ?? 'EUR',
+                'date'         => $validated['date'],
+                'due_date'     => $validated['due_date'],
+                'currency'     => $validated['currency'],
                 'status'       => 'draft',
                 'notes'        => $validated['notes'] ?? null,
                 'terms'        => $validated['terms'] ?? null,
                 'public_token' => Str::random(48),
-            ]);
+            ];
+
+            // Retry anti-colisión por índice único budgets_number_unique
+            $attempts = 0;
+            start_create:
+            try {
+                $budget = Budget::create($data);
+            } catch (UniqueConstraintViolationException $e) {
+                if ($attempts++ < 2) {
+                    // Genera un nuevo número y reintenta
+                    if (class_exists(NumberSequence::class)) {
+                        $number = NumberSequence::next('budget', auth()->id());
+                        if (preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m)) {
+                            $year     = (int)($m[1] ?? $year);
+                            $sequence = (int)($m[2] ?? 0);
+                        }
+                        $data['number'] = $number;
+                        $data['year'] = $year;
+                        $data['sequence'] = $sequence;
+                    } else {
+                        // Forzamos al modelo a regenerar limpiando number/sequence
+                        $data['number'] = null;
+                        $data['sequence'] = null;
+                    }
+                    goto start_create;
+                }
+                throw $e;
+            }
 
             $subtotal = 0;
             $tax_total = 0;
@@ -164,7 +206,7 @@ class BudgetController extends Controller
             $budget->update([
                 'client_id' => $validated['client_id'],
                 'date'      => $validated['date'] ?? $budget->date,
-                'due_date'  => $validated['due_date'] ?? null,
+                'due_date'  => $validated['due_date'] ?? $budget->due_date ?? now()->addDays(14)->toDateString(),
                 'currency'  => $validated['currency'] ?? 'EUR',
                 'notes'     => $validated['notes'] ?? null,
                 'terms'     => $validated['terms'] ?? null,

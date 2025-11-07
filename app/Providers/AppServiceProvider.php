@@ -6,12 +6,15 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Pagination\Paginator;
 use App\Models\UserSetting;
 use App\Observers\UserSettingObserver;
+use App\Contracts\Fiskaly\FiskalyClientInterface;
+use App\Services\Fiskaly\FiskalyClient;
 
 class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
         // Bindings / singletons / configs condicionales
+        $this->app->bind(FiskalyClientInterface::class, FiskalyClient::class);
     }
 
     public function boot(): void
