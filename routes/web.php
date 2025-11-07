@@ -127,3 +127,4 @@ Route::prefix('pub')->name('public.')->group(function () {
 
 // Auth scaffolding (Breeze)
 require __DIR__ . '/auth.php';
+// require __DIR__.'/verifactu.php';
