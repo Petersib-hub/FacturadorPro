@@ -5,9 +5,14 @@ namespace App\Models;
 use App\Models\Traits\Tenantable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Concerns\HasVerifactu;
 
 class Invoice extends Model
 {
+
+    use HasVerifactu;
+    // ...
+
     use Tenantable, SoftDeletes;
 
     protected $fillable = [
