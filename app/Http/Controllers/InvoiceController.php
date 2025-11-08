@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use App\Support\Audit;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 class InvoiceController extends Controller
 {
@@ -28,7 +29,6 @@ class InvoiceController extends Controller
         $this->authorizeResource(Invoice::class, 'invoice');
     }
 
-    /** Listado de facturas */
     public function index(Request $request)
     {
         $q = $request->get('q');
@@ -49,48 +49,49 @@ class InvoiceController extends Controller
         return view('invoices.index', compact('invoices', 'q'));
     }
 
-    /** Form de creación */
     public function create()
     {
-        $clients = Client::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')
-            ->get();
-
-        // Productos para el selector opcional por línea (solo id y nombre para evitar columnas inexistentes)
-        $products = Product::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')
-            ->get(['id','name']);
+        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get(['id','name']);
 
         return view('invoices.create', compact('clients','products'));
     }
 
-    /** Guardar factura nueva */
     public function store(StoreInvoiceRequest $request)
     {
         $v = $request->validated();
+        unset($v['number']); // nunca aceptar del form
 
         return DB::transaction(function () use ($v) {
-            $number = NumberSequence::next('invoice', auth()->id()); // FAC-YYYY-####
-            preg_match('/^FAC-(\d{4})-(\d{4})$/', $number, $m);
-            $year     = (int)($m[1] ?? now()->year);
-            $sequence = (int)($m[2] ?? 0);
+            $attempts = 0;
+            $series   = 'FAC';
+            $year     = (int) date('Y', strtotime($v['date'] ?? now()->toDateString()));
 
-            $invoice = Invoice::create([
-                'user_id'      => auth()->id(),
-                'client_id'    => $v['client_id'],
-                'number'       => $number,
-                'sequence'     => $sequence,
-                'year'         => $year,
-                'date'         => $v['date'] ?? now()->toDateString(),
-                'due_date'     => $v['due_date'] ?? null,
-                'currency'     => $v['currency'] ?? 'EUR',
-                'status'       => 'pending',
-                'notes'        => $v['notes'] ?? null,
-                'terms'        => $v['terms'] ?? null,
-                'public_token' => Str::random(48),
-            ]);
+            retry_create:
+            try {
+                $number = NumberSequence::next('invoice', $series, $year); // FAC-YYYY-####
+                preg_match('/^([A-Z]+)-(\d{4})-(\d{4})$/', $number, $m);
+                $year     = (int)($m[2] ?? $year);
+                $sequence = (int)($m[3] ?? 0);
+
+                $invoice = Invoice::create([
+                    'user_id'      => auth()->id(),
+                    'client_id'    => $v['client_id'],
+                    'number'       => $number,
+                    'sequence'     => $sequence,
+                    'year'         => $year,
+                    'date'         => $v['date'] ?? now()->toDateString(),
+                    'due_date'     => $v['due_date'] ?? null,
+                    'currency'     => $v['currency'] ?? 'EUR',
+                    'status'       => 'pending',
+                    'notes'        => $v['notes'] ?? null,
+                    'terms'        => $v['terms'] ?? null,
+                    'public_token' => Str::random(48),
+                ]);
+            } catch (UniqueConstraintViolationException $e) {
+                if ($attempts++ < 3) goto retry_create;
+                throw $e;
+            }
 
             $subtotal = 0; $tax_total = 0; $total = 0; $pos = 0;
 
@@ -100,11 +101,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it['tax_rate'];
                 $disc  = (float)($it['discount'] ?? 0);
 
-                $base   = $qty * $price;
-                $d      = $base * ($disc / 100);
-                $after  = $base - $d;
-                $tax    = $after * ($rate / 100);
-                $line   = $after + $tax;
+                $base = $qty * $price;
+                $d = $base * ($disc / 100);
+                $after = $base - $d;
+                $tax = $after * ($rate / 100);
+                $line = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -124,42 +125,28 @@ class InvoiceController extends Controller
             $invoice->update(compact('subtotal', 'tax_total', 'total'));
             $invoice->recalcStatus();
 
-            Audit::record('invoice.created','invoice',$invoice->id,[
-                'number'=>$invoice->number
-            ]);
+            Audit::record('invoice.created','invoice',$invoice->id,['number'=>$invoice->number]);
 
-            return redirect()
-                ->route('invoices.show', $invoice)
-                ->with('ok', 'Factura creada.');
+            return redirect()->route('invoices.show', $invoice)->with('ok', 'Factura creada.');
         });
     }
 
-    /** Ver factura */
     public function show(Invoice $invoice)
     {
         $invoice->load('client', 'items', 'payments');
         return view('invoices.show', compact('invoice'));
     }
 
-    /** Editar factura */
     public function edit(Invoice $invoice)
     {
         $invoice->load('items');
 
-        $clients = Client::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')->get();
-
-        // Productos para el selector opcional por línea (solo id y nombre)
-        $products = Product::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')
-            ->get(['id','name']);
+        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get(['id','name']);
 
         return view('invoices.edit', compact('invoice','clients','products'));
     }
 
-    /** Actualizar factura */
     public function update(UpdateInvoiceRequest $request, Invoice $invoice)
     {
         $v = $request->validated();
@@ -174,7 +161,6 @@ class InvoiceController extends Controller
                 'terms'     => $v['terms'] ?? null,
             ]);
 
-            // Reemplazar items
             $invoice->items()->delete();
 
             $subtotal = 0; $tax_total = 0; $total = 0; $pos = 0;
@@ -185,11 +171,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it['tax_rate'];
                 $disc  = (float)($it['discount'] ?? 0);
 
-                $base   = $qty * $price;
-                $d      = $base * ($disc / 100);
-                $after  = $base - $d;
-                $tax    = $after * ($rate / 100);
-                $line   = $after + $tax;
+                $base = $qty * $price;
+                $d = $base * ($disc / 100);
+                $after = $base - $d;
+                $tax = $after * ($rate / 100);
+                $line = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -209,17 +195,12 @@ class InvoiceController extends Controller
             $invoice->update(compact('subtotal', 'tax_total', 'total'));
             $invoice->recalcStatus();
 
-            Audit::record('invoice.updated','invoice',$invoice->id,[
-                'number'=>$invoice->number
-            ]);
+            Audit::record('invoice.updated','invoice',$invoice->id,['number'=>$invoice->number]);
 
-            return redirect()
-                ->route('invoices.show', $invoice)
-                ->with('ok', 'Factura actualizada.');
+            return redirect()->route('invoices.show', $invoice)->with('ok', 'Factura actualizada.');
         });
     }
 
-    /** Eliminar */
     public function destroy(Invoice $invoice)
     {
         $id  = $invoice->id;
@@ -231,7 +212,6 @@ class InvoiceController extends Controller
         return redirect()->route('invoices.index')->with('ok', 'Factura eliminada.');
     }
 
-    /** Descargar PDF (auditoría incluida) */
     public function pdf(Invoice $invoice)
     {
         $this->authorize('view', $invoice);
@@ -241,11 +221,9 @@ class InvoiceController extends Controller
         $pdf = Pdf::loadView($view, compact('invoice'));
 
         Audit::record('invoice.pdf','invoice',$invoice->id,['number'=>$invoice->number]);
-
         return $pdf->download($invoice->number . '.pdf');
     }
 
-    /** Enviar por email (adjunta PDF) */
     public function email(Request $request, Invoice $invoice)
     {
         $this->authorize('view', $invoice);
@@ -268,11 +246,7 @@ class InvoiceController extends Controller
         $pdfBin = Pdf::loadView('pdf.invoice', compact('invoice', 'company'))->output();
 
         $mailable = new InvoiceMail($invoice, $pdfBin);
-        if (!empty($data['subject'])) {
-            $mailable->subject($data['subject']);
-        } else {
-            $mailable->subject('Factura ' . $invoice->number);
-        }
+        $mailable->subject($data['subject'] ?? ('Factura ' . $invoice->number));
 
         $mail = Mail::to($data['to']);
         if (!empty($data['cc']))  { $mail->cc($data['cc']); }
@@ -282,9 +256,7 @@ class InvoiceController extends Controller
 
         if (empty($invoice->sent_at)) {
             $invoice->sent_at = now();
-            if ($invoice->status !== 'paid') {
-                $invoice->status = 'sent';
-            }
+            if ($invoice->status !== 'paid') $invoice->status = 'sent';
             $invoice->save();
         }
 
@@ -295,52 +267,44 @@ class InvoiceController extends Controller
         return back()->with('ok', 'Factura enviada por email.');
     }
 
-    /** Marcar como enviada (sin email) */
-    public function markSent(Invoice $invoice)
-    {
-        $this->authorize('update', $invoice);
-
-        if (empty($invoice->public_token)) {
-            $invoice->public_token = Str::random(48);
-        }
-        $invoice->sent_at = now();
-        if ($invoice->status !== 'paid') {
-            $invoice->status = 'sent';
-        }
-        $invoice->save();
-
-        Audit::record('invoice.mark_sent','invoice',$invoice->id);
-
-        return back()->with('ok', 'Factura marcada como enviada.');
-    }
-
-    /** Convertir presupuesto → factura */
+    /** Convertir Presupuesto → Factura (con vínculo y referencia) */
     public function convertFromBudget(Budget $budget)
     {
         $this->authorize('create', Invoice::class);
-
         $budget->load('items');
 
         return DB::transaction(function () use ($budget) {
-            $number = NumberSequence::next('invoice', auth()->id());
-            preg_match('/^FAC-(\d{4})-(\d{4})$/', $number, $m);
-            $year     = (int)($m[1] ?? now()->year);
-            $sequence = (int)($m[2] ?? 0);
+            $attempts = 0;
+            $series   = 'FAC';
+            $year     = (int) now()->year;
 
-            $invoice = Invoice::create([
-                'user_id'      => auth()->id(),
-                'client_id'    => $budget->client_id,
-                'number'       => $number,
-                'sequence'     => $sequence,
-                'year'         => $year,
-                'date'         => now()->toDateString(),
-                'due_date'     => $budget->due_date,
-                'currency'     => $budget->currency,
-                'status'       => 'pending',
-                'notes'        => $budget->notes,
-                'terms'        => $budget->terms,
-                'public_token' => Str::random(48),
-            ]);
+            retry_create:
+            try {
+                $number = NumberSequence::next('invoice', $series, $year);
+                preg_match('/^([A-Z]+)-(\d{4})-(\d{4})$/', $number, $m);
+                $year     = (int)($m[2] ?? $year);
+                $sequence = (int)($m[3] ?? 0);
+
+                $invoice = Invoice::create([
+                    'user_id'              => auth()->id(),
+                    'client_id'            => $budget->client_id,
+                    'origin_budget_id'     => $budget->id,
+                    'origin_budget_number' => $budget->number,
+                    'number'               => $number,
+                    'sequence'             => $sequence,
+                    'year'                 => $year,
+                    'date'                 => now()->toDateString(),
+                    'due_date'             => $budget->due_date,
+                    'currency'             => $budget->currency,
+                    'status'               => 'pending',
+                    'notes'                => $budget->notes,
+                    'terms'                => $budget->terms,
+                    'public_token'         => Str::random(48),
+                ]);
+            } catch (UniqueConstraintViolationException $e) {
+                if ($attempts++ < 3) goto retry_create;
+                throw $e;
+            }
 
             $subtotal = 0; $tax_total = 0; $total = 0; $pos = 0;
 
@@ -350,11 +314,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it->tax_rate;
                 $disc  = (float)$it->discount;
 
-                $base   = $qty * $price;
-                $d      = $base * ($disc / 100);
-                $after  = $base - $d;
-                $tax    = $after * ($rate / 100);
-                $line   = $after + $tax;
+                $base = $qty * $price;
+                $d = $base * ($disc / 100);
+                $after = $base - $d;
+                $tax = $after * ($rate / 100);
+                $line = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -374,24 +338,22 @@ class InvoiceController extends Controller
             $invoice->update(compact('subtotal', 'tax_total', 'total'));
             $invoice->recalcStatus();
 
-            if ($budget->status !== 'accepted') {
-                $budget->update(['status' => 'accepted']);
-            }
-
-            Audit::record('invoice.created_from_budget','invoice',$invoice->id,[
-                'budget_id'=>$budget->id,'invoice_number'=>$invoice->number
+            // Marcar el presupuesto como convertido y enlazar
+            $budget->update([
+                'status'               => $budget->status === 'accepted' ? $budget->status : 'accepted',
+                'converted_invoice_id' => $invoice->id,
             ]);
 
-            return redirect()
-                ->route('invoices.show', $invoice)
-                ->with('ok', 'Factura creada desde presupuesto.');
+            Audit::record('invoice.created_from_budget','invoice',$invoice->id,[
+                'budget_id'=>$budget->id,'budget_number'=>$budget->number,'invoice_number'=>$invoice->number
+            ]);
+
+            return redirect()->route('invoices.show', $invoice)->with('ok', 'Factura creada desde presupuesto.');
         });
     }
 
-    /** Registrar pago */
     public function registerPayment(StoreInvoicePaymentRequest $request, Invoice $invoice)
     {
-        // Autorización específica para pagos (evita 403)
         $this->authorize('pay', $invoice);
 
         $v = $request->validated();

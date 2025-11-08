@@ -31,12 +31,12 @@ class BudgetController extends Controller
         $q = $request->get('q');
 
         $budgets = Budget::query()
-            ->where('user_id', auth()->id())                 // tenant
+            ->where('user_id', auth()->id())
             ->with('client')
             ->when($q, function ($b) use ($q) {
                 $b->where(function ($w) use ($q) {
                     $w->where('number', 'like', "%{$q}%")
-                        ->orWhereHas('client', fn($c) => $c->where('name', 'like', "%{$q}%"));
+                      ->orWhereHas('client', fn($c) => $c->where('name', 'like', "%{$q}%"));
                 });
             })
             ->latest()
@@ -48,108 +48,72 @@ class BudgetController extends Controller
 
     public function create()
     {
-        $clients = Client::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')->get();
-
-        $products = Product::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')->get();
-
-        $taxRates = TaxRate::forAuthUser()
-            ->orderByDesc('is_default')
-            ->orderBy('rate')
-            ->get();
+        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $taxRates = TaxRate::forAuthUser()->orderByDesc('is_default')->orderBy('rate')->get();
 
         return view('budgets.create', compact('clients', 'products', 'taxRates'));
     }
 
     public function store(StoreBudgetRequest $request)
     {
-        $validated = $request->validated();
+        $v = $request->validated();
 
-        // Defaults seguros
-        $validated['currency'] = $validated['currency'] ?? 'EUR';
-        $validated['status']   = 'draft';
-        $validated['date']     = $validated['date'] ?? now()->toDateString();
-        $validated['due_date'] = $validated['due_date'] ?? now()->addDays(14)->toDateString();
+        $v['currency'] = $v['currency'] ?? 'EUR';
+        $v['status']   = 'draft';
+        $v['date']     = $v['date'] ?? now()->toDateString();
+        $v['due_date'] = $v['due_date'] ?? now()->addDays(14)->toDateString();
 
-        return DB::transaction(function () use ($validated) {
-            // Si existe NumberSequence, generamos número atómico aquí; si no, dejar que el modelo lo haga.
-            $number = null;
-            $year = (int) (date('Y', strtotime($validated['date'])));
-            $sequence = null;
+        unset($v['number']); // nunca aceptar del form
 
-            if (class_exists(NumberSequence::class)) {
-                $number = NumberSequence::next('budget', auth()->id()); // PRES-YYYY-####
+        return DB::transaction(function () use ($v) {
+            $attempts = 0;
+            $series   = 'PRES';
+            $year     = (int) date('Y', strtotime($v['date']));
+
+            retry_create:
+            try {
+                $number = NumberSequence::next('budget', $series, $year); // PRES-YYYY-####
+                $sequence = 0;
                 if (preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m)) {
                     $year     = (int)($m[1] ?? $year);
                     $sequence = (int)($m[2] ?? 0);
                 }
-            }
 
-            $data = [
-                'user_id'      => auth()->id(),
-                'client_id'    => $validated['client_id'],
-                'number'       => $number,   // si es null, el modelo lo genera en booted()
-                'sequence'     => $sequence, // puede quedar null; booted() lo completa
-                'year'         => $year,
-                'date'         => $validated['date'],
-                'due_date'     => $validated['due_date'],
-                'currency'     => $validated['currency'],
-                'status'       => 'draft',
-                'notes'        => $validated['notes'] ?? null,
-                'terms'        => $validated['terms'] ?? null,
-                'public_token' => Str::random(48),
-            ];
-
-            // Retry anti-colisión por índice único budgets_number_unique
-            $attempts = 0;
-            start_create:
-            try {
-                $budget = Budget::create($data);
+                $budget = Budget::create([
+                    'user_id'      => auth()->id(),
+                    'client_id'    => $v['client_id'],
+                    'number'       => $number,
+                    'sequence'     => $sequence,
+                    'year'         => $year,
+                    'date'         => $v['date'],
+                    'due_date'     => $v['due_date'],
+                    'currency'     => $v['currency'],
+                    'status'       => 'draft',
+                    'notes'        => $v['notes'] ?? null,
+                    'terms'        => $v['terms'] ?? null,
+                    'public_token' => Str::random(48),
+                ]);
             } catch (UniqueConstraintViolationException $e) {
-                if ($attempts++ < 2) {
-                    // Genera un nuevo número y reintenta
-                    if (class_exists(NumberSequence::class)) {
-                        $number = NumberSequence::next('budget', auth()->id());
-                        if (preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m)) {
-                            $year     = (int)($m[1] ?? $year);
-                            $sequence = (int)($m[2] ?? 0);
-                        }
-                        $data['number'] = $number;
-                        $data['year'] = $year;
-                        $data['sequence'] = $sequence;
-                    } else {
-                        // Forzamos al modelo a regenerar limpiando number/sequence
-                        $data['number'] = null;
-                        $data['sequence'] = null;
-                    }
-                    goto start_create;
-                }
+                if ($attempts++ < 3) goto retry_create;
                 throw $e;
             }
 
-            $subtotal = 0;
-            $tax_total = 0;
-            $total = 0;
-            $pos = 0;
+            $subtotal = 0; $tax_total = 0; $total = 0; $pos = 0;
 
-            foreach ($validated['items'] as $it) {
-                $qty   = (float) $it['quantity'];
-                $price = (float) $it['unit_price'];
-                $rate  = (float) $it['tax_rate'];
-                $disc  = (float) ($it['discount'] ?? 0);
+            foreach ($v['items'] as $it) {
+                $qty   = (float)$it['quantity'];
+                $price = (float)$it['unit_price'];
+                $rate  = (float)$it['tax_rate'];
+                $disc  = (float)($it['discount'] ?? 0);
 
-                $line_base        = $qty * $price;
-                $line_disc        = $line_base * ($disc / 100);
-                $line_after_disc  = $line_base - $line_disc;
-                $line_tax         = $line_after_disc * ($rate / 100);
-                $line_total       = $line_after_disc + $line_tax;
+                $base = $qty * $price;
+                $d = $base * ($disc / 100);
+                $after = $base - $d;
+                $tax = $after * ($rate / 100);
+                $line = $after + $tax;
 
-                $subtotal += $line_after_disc;
-                $tax_total += $line_tax;
-                $total    += $line_total;
+                $subtotal += $after; $tax_total += $tax; $total += $line;
 
                 BudgetItem::create([
                     'budget_id'   => $budget->id,
@@ -159,16 +123,14 @@ class BudgetController extends Controller
                     'unit_price'  => $price,
                     'tax_rate'    => $rate,
                     'discount'    => $disc,
-                    'total_line'  => $line_total,
+                    'total_line'  => $line,
                     'position'    => $pos++,
                 ]);
             }
 
             $budget->update(compact('subtotal', 'tax_total', 'total'));
 
-            return redirect()
-                ->route('budgets.show', $budget)
-                ->with('ok', 'Presupuesto creado.');
+            return redirect()->route('budgets.show', $budget)->with('ok', 'Presupuesto creado.');
         });
     }
 
@@ -182,59 +144,44 @@ class BudgetController extends Controller
     {
         $budget->load('items');
 
-        $clients = Client::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')->get();
-
-        $products = Product::query()
-            ->where('user_id', auth()->id())
-            ->orderBy('name')->get();
-
-        $taxRates = TaxRate::forAuthUser()
-            ->orderByDesc('is_default')
-            ->orderBy('rate')
-            ->get();
+        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $taxRates = TaxRate::forAuthUser()->orderByDesc('is_default')->orderBy('rate')->get();
 
         return view('budgets.edit', compact('budget', 'clients', 'products', 'taxRates'));
     }
 
     public function update(UpdateBudgetRequest $request, Budget $budget)
     {
-        $validated = $request->validated();
+        $v = $request->validated();
 
-        return DB::transaction(function () use ($validated, $budget) {
+        return DB::transaction(function () use ($v, $budget) {
             $budget->update([
-                'client_id' => $validated['client_id'],
-                'date'      => $validated['date'] ?? $budget->date,
-                'due_date'  => $validated['due_date'] ?? $budget->due_date ?? now()->addDays(14)->toDateString(),
-                'currency'  => $validated['currency'] ?? 'EUR',
-                'notes'     => $validated['notes'] ?? null,
-                'terms'     => $validated['terms'] ?? null,
+                'client_id' => $v['client_id'],
+                'date'      => $v['date'] ?? $budget->date,
+                'due_date'  => $v['due_date'] ?? ($budget->due_date ?? now()->addDays(14)->toDateString()),
+                'currency'  => $v['currency'] ?? 'EUR',
+                'notes'     => $v['notes'] ?? null,
+                'terms'     => $v['terms'] ?? null,
             ]);
 
-            // Reemplazar items
             $budget->items()->delete();
 
-            $subtotal = 0;
-            $tax_total = 0;
-            $total = 0;
-            $pos = 0;
+            $subtotal = 0; $tax_total = 0; $total = 0; $pos = 0;
 
-            foreach ($validated['items'] as $it) {
-                $qty   = (float) $it['quantity'];
-                $price = (float) $it['unit_price'];
-                $rate  = (float) $it['tax_rate'];
-                $disc  = (float) ($it['discount'] ?? 0);
+            foreach ($v['items'] as $it) {
+                $qty   = (float)$it['quantity'];
+                $price = (float)$it['unit_price'];
+                $rate  = (float)$it['tax_rate'];
+                $disc  = (float)($it['discount'] ?? 0);
 
-                $line_base        = $qty * $price;
-                $line_disc        = $line_base * ($disc / 100);
-                $line_after_disc  = $line_base - $line_disc;
-                $line_tax         = $line_after_disc * ($rate / 100);
-                $line_total       = $line_after_disc + $line_tax;
+                $base = $qty * $price;
+                $d = $base * ($disc / 100);
+                $after = $base - $d;
+                $tax = $after * ($rate / 100);
+                $line = $after + $tax;
 
-                $subtotal += $line_after_disc;
-                $tax_total += $line_tax;
-                $total    += $line_total;
+                $subtotal += $after; $tax_total += $tax; $total += $line;
 
                 BudgetItem::create([
                     'budget_id'   => $budget->id,
@@ -244,16 +191,14 @@ class BudgetController extends Controller
                     'unit_price'  => $price,
                     'tax_rate'    => $rate,
                     'discount'    => $disc,
-                    'total_line'  => $line_total,
+                    'total_line'  => $line,
                     'position'    => $pos++,
                 ]);
             }
 
             $budget->update(compact('subtotal', 'tax_total', 'total'));
 
-            return redirect()
-                ->route('budgets.show', $budget)
-                ->with('ok', 'Presupuesto actualizado.');
+            return redirect()->route('budgets.show', $budget)->with('ok', 'Presupuesto actualizado.');
         });
     }
 
@@ -263,22 +208,18 @@ class BudgetController extends Controller
         return redirect()->route('budgets.index')->with('ok', 'Presupuesto eliminado.');
     }
 
-    // === PDF ===
     public function pdf(Budget $budget)
     {
         $budget->load('client', 'items');
 
-        // Selección dinámica de plantilla
         $view = \App\Support\PdfTemplates::budgetView($budget->user_id);
 
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, compact('budget'));
         return $pdf->download($budget->number . '.pdf');
     }
 
-    // === Envío por email (adjunta PDF) ===
     public function email(Request $request, Budget $budget)
     {
-        // En local permite dominios sin DNS y añadimos compatibilidad con cc/bcc/subject
         $data = $request->validate([
             'to'      => ['required', 'email:rfc'],
             'cc'      => ['nullable', 'email:rfc'],
@@ -294,26 +235,16 @@ class BudgetController extends Controller
         $budget->load('client', 'items');
         $company = UserSetting::query()->where('user_id', $budget->user_id)->first();
 
-        // ✅ Usar plantilla dinámica (igual que en pdf())
         $view = \App\Support\PdfTemplates::budgetView($budget->user_id);
         $pdf = Pdf::loadView($view, compact('budget', 'company'))->output();
 
         $mailable = new BudgetMail($budget, $pdf);
-        if (!empty($data['subject'])) {
-            $mailable->subject($data['subject']);
-        } else {
-            $mailable->subject('Presupuesto ' . $budget->number);
-        }
+        $mailable->subject($data['subject'] ?? ('Presupuesto ' . $budget->number));
 
         $mail = Mail::to($data['to']);
-        if (!empty($data['cc'])) {
-            $mail->cc($data['cc']);
-        }
-        if (!empty($data['bcc'])) {
-            $mail->bcc($data['bcc']);
-        }
+        if (!empty($data['cc']))  $mail->cc($data['cc']);
+        if (!empty($data['bcc'])) $mail->bcc($data['bcc']);
 
-        // Igualamos el comportamiento del de facturas para no romper nada
         app()->environment('local') ? $mail->send($mailable) : $mail->queue($mailable);
 
         return back()->with('ok', 'Presupuesto enviado por email.');

@@ -7,37 +7,33 @@ use Illuminate\Support\Facades\DB;
 
 class NumberSequence extends Model
 {
-    protected $fillable = ['user_id','type','year','last'];
+    // Trabajamos por (type, series, year)
+    protected $fillable = ['user_id','type','series','year','last'];
 
     /**
-     * Genera el siguiente número para el usuario y tipo.
-     * Formatos:
-     *  - budget : PRES-YYYY-#### (relleno 4)
-     *  - invoice: FAC-YYYY-####  (relleno 4)
+     * Genera el siguiente número atómico por tipo+serie+año.
+     *  - budget  -> PRES-YYYY-#### (por defecto)
+     *  - invoice -> FAC-YYYY-#### (por defecto)
      */
-    public static function next(string $type, int $userId): string
+    public static function next(string $type, ?string $series = null, ?int $year = null): string
     {
-        $year = (int) now()->year;
+        $year   = $year   ?? (int) now()->year;
+        $series = $series ?? ($type === 'budget' ? 'PRES' : ($type === 'invoice' ? 'FAC' : strtoupper($type)));
 
-        $prefix = match ($type) {
-            'budget'  => 'PRES',
-            'invoice' => 'FAC',
-            default   => strtoupper($type),
-        };
+        $prefix = $series; // prefijo visible
 
-        return DB::transaction(function () use ($type, $userId, $year, $prefix) {
+        return DB::transaction(function () use ($type, $series, $year, $prefix) {
             $row = static::where([
-                    'user_id' => $userId,
-                    'type'    => $type,
-                    'year'    => $year,
-                ])
-                ->lockForUpdate()
-                ->first();
+                'type'   => $type,
+                'series' => $series,
+                'year'   => $year,
+            ])->lockForUpdate()->first();
 
             if (!$row) {
                 $row = static::create([
-                    'user_id' => $userId,
+                    'user_id' => null,
                     'type'    => $type,
+                    'series'  => $series,
                     'year'    => $year,
                     'last'    => 0,
                 ]);
@@ -47,7 +43,6 @@ class NumberSequence extends Model
             $row->save();
 
             $seq = str_pad((string) $row->last, 4, '0', STR_PAD_LEFT);
-
             return "{$prefix}-{$year}-{$seq}";
         });
     }

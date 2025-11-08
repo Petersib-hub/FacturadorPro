@@ -14,7 +14,7 @@
 @endpush
 
 @section('content')
-    <div class="d-flex align-items-center justify-content-between mb-3">
+    <div class="d-flex align-items-center justify-content-between mb-2">
         <h4 class="mb-0">Factura {{ $invoice->number }}</h4>
 
         <div class="btn-group">
@@ -39,6 +39,17 @@
             </ul>
         </div>
     </div>
+
+    {{-- Referencia a Presupuesto origen --}}
+    @if(!empty($invoice->origin_budget_number))
+        <div class="alert alert-info py-2 mb-3">
+            Factura derivada del presupuesto
+            <strong>{{ $invoice->origin_budget_number }}</strong>
+            @if(!empty($invoice->origin_budget_id))
+                (<a href="{{ route('budgets.show', $invoice->origin_budget_id) }}">ver presupuesto</a>)
+            @endif
+        </div>
+    @endif
 
     {{-- Estado Veri*factu + QR + acciones (UI) --}}
     <div class="mb-2">
@@ -81,6 +92,17 @@
                     <div><strong>Fecha:</strong> {{ optional($invoice->date)->format('d/m/Y') }}</div>
                     <div><strong>Vence:</strong> {{ optional($invoice->due_date)->format('d/m/Y') ?? '—' }}</div>
                     <div><strong>Estado:</strong> <span class="badge {{ $sClass }}">{{ $sLabel }}</span></div>
+
+                    {{-- Campo informativo dentro de la ficha --}}
+                    @if(!empty($invoice->origin_budget_number))
+                        <div><strong>Presupuesto origen:</strong>
+                            @if(!empty($invoice->origin_budget_id))
+                                <a href="{{ route('budgets.show', $invoice->origin_budget_id) }}">{{ $invoice->origin_budget_number }}</a>
+                            @else
+                                {{ $invoice->origin_budget_number }}
+                            @endif
+                        </div>
+                    @endif
                 </div>
             </div>
         </div>
@@ -252,7 +274,7 @@
 
     function parseMoney(text) {
         if (!text) return NaN;
-        let raw = text.toString().replace(/[^\d,\.\-]/g, '');
+        let raw = text.toString().replace(/[^\d,\.\-\,]/g, '');
         if (raw.includes('.') && raw.includes(',')) {
             raw = raw.replace(/\./g, '').replace(',', '.');
         } else if (raw.includes(',') && !raw.includes('.')) {
