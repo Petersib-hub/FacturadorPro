@@ -12,7 +12,11 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        //
+        // Ping de cumplimiento (art. 9.1.a) una vez al día al iniciar el sistema
+        // Se añade al GRUPO "web" en Laravel 11 (no existe app/Http/Kernel.php)
+        $middleware->appendToGroup('web', [
+            \App\Http\Middleware\ComplianceBootPing::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

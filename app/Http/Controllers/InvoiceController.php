@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use App\Support\Audit;
 use Illuminate\Database\UniqueConstraintViolationException;
+use App\Support\Compliance;
 
 class InvoiceController extends Controller
 {
@@ -347,6 +348,14 @@ class InvoiceController extends Controller
             Audit::record('invoice.created_from_budget','invoice',$invoice->id,[
                 'budget_id'=>$budget->id,'budget_number'=>$budget->number,'invoice_number'=>$invoice->number
             ]);
+
+            // LOG de cumplimiento (art. 9): conversión presupuesto -> factura
+            Compliance::log('art. 9', 'CONVERT_BUDGET_TO_INVOICE', 'Convertido presupuesto a factura', [
+                'budget_id'       => $budget->id,
+                'budget_number'   => $budget->number,
+                'invoice_id'      => $invoice->id,
+                'invoice_number'  => $invoice->number,
+            ], 'invoice', $invoice->id, auth()->id());
 
             return redirect()->route('invoices.show', $invoice)->with('ok', 'Factura creada desde presupuesto.');
         });
