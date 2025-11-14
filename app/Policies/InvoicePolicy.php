@@ -24,13 +24,14 @@ class InvoicePolicy
 
     public function update(User $user, Invoice $invoice): bool
     {
-        // Permite actualizar siempre que sea del usuario (independiente del estado)
+        // permitir actualizar siempre que sea del usuario (estado independiente)
         return $invoice->user_id === $user->id;
     }
 
     public function delete(User $user, Invoice $invoice): bool
     {
-        return $invoice->user_id === $user->id;
+        // Normativa: no eliminar facturas
+        return false;
     }
 
     /** Permiso específico para registrar pagos */

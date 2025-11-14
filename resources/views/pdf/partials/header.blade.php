@@ -9,7 +9,7 @@
     $issuerAdr2  = trim(($s?->zip ? $s->zip.' ' : '').($s?->city ?? ''));
     $issuerCtry  = $s?->country;
 
-    $issuerEmail = $s?->email ?: optional($s?->user)->email;  // fallback al email del usuario
+    $issuerEmail = $s?->email ?: optional($s?->user)->email;
     $issuerPhone = $s?->phone;
 
     $logoPath = \App\Support\Branding::tenantLogoDiskPathForPdf($s?->user_id);

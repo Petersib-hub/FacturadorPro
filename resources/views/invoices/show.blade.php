@@ -4,11 +4,7 @@
 
 @push('head')
     <style>
-        .desc-cell {
-            white-space: pre-wrap;
-            word-break: break-word;
-            overflow-wrap: anywhere
-        }
+        .desc-cell { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere }
         .table-responsive { overflow: visible }
     </style>
 @endpush
@@ -27,15 +23,16 @@
                 <li>
                     <a class="dropdown-item" href="#" onclick="event.preventDefault(); document.getElementById('markSentForm').submit();">Marcar como enviada</a>
                 </li>
-                @php
-                    $publicUrl = $invoice->public_token ? route('public.invoices.show', $invoice->public_token) : null;
-                @endphp
+                @php $publicUrl = $invoice->public_token ? route('public.invoices.show', $invoice->public_token) : null; @endphp
                 @if($publicUrl)
                     <li><a class="dropdown-item" href="#" onclick="copyPublicLink('{{ $publicUrl }}', {{ $invoice->id }})">Copiar enlace público</a></li>
                     <li><a class="dropdown-item" href="{{ $publicUrl }}" target="_blank" rel="noopener">Abrir portal del cliente</a></li>
                 @endif
                 <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="{{ route('invoices.edit', $invoice) }}">Editar</a></li>
+                {{-- Nueva acción: Rectificar --}}
+                <li><a class="dropdown-item text-warning" href="#" data-bs-toggle="modal" data-bs-target="#rectifyModal">Rectificar…</a></li>
+                {{-- Sin eliminar por normativa --}}
             </ul>
         </div>
     </div>
@@ -51,13 +48,11 @@
         </div>
     @endif
 
-    {{-- Estado Veri*factu + QR + acciones (UI) --}}
+    {{-- Veri*factu UI --}}
     <div class="mb-2">
         @include('verifactu.status-badge', ['invoice' => $invoice])
         @includeIf('verifactu._qr', ['invoice' => $invoice])
-        @auth
-            @includeIf('verifactu._actions', ['invoice' => $invoice])
-        @endauth
+        @auth @includeIf('verifactu._actions', ['invoice' => $invoice]) @endauth
     </div>
 
     <form id="markSentForm" method="POST" action="{{ route('invoices.markSent', $invoice) }}" class="d-none">
@@ -195,7 +190,6 @@
                     <input type="hidden" name="amount" id="amount" required>
                     <small class="text-muted">Se acepta coma o punto. Se guardará como {{ $invoice->currency ?? 'EUR' }}.</small>
                 </div>
-
                 <div class="col-md-3">
                     <label class="form-label">Fecha</label>
                     <input name="payment_date" type="date" class="form-control" value="{{ now()->toDateString() }}" required>
@@ -220,6 +214,7 @@
         </div>
     </div>
 
+    {{-- Modal Enviar email --}}
     <div class="modal fade" id="sendEmailModal" tabindex="-1" aria-labelledby="sendEmailModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <form class="modal-content" method="post" action="{{ route('invoices.email', $invoice) }}">
@@ -254,6 +249,28 @@
             </form>
         </div>
     </div>
+
+    {{-- Modal Rectificar --}}
+    <div class="modal fade" id="rectifyModal" tabindex="-1" aria-labelledby="rectifyModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <form class="modal-content" method="post" action="{{ route('invoices.rectify', $invoice) }}">
+                @csrf
+                <div class="modal-header">
+                    <h5 class="modal-title" id="rectifyModalLabel">Crear factura rectificativa</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Motivo de rectificación</label>
+                    <textarea name="reason" class="form-control" rows="3" required placeholder="Describe el motivo..."></textarea>
+                    <small class="text-muted">Se creará una factura con líneas negativas por los mismos importes.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button class="btn btn-warning">Crear rectificativa</button>
+                </div>
+            </form>
+        </div>
+    </div>
 @endsection
 
 @push('scripts')
@@ -261,9 +278,7 @@
 (function () {
     const LOCALE = '{{ str_replace("_", "-", app()->getLocale() ?: "es-ES") }}' || 'es-ES';
     const CURRENCY = '{{ $invoice->currency ?? "EUR" }}';
-
     const fmt = new Intl.NumberFormat(LOCALE, { style: 'currency', currency: CURRENCY, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
     const $display = document.getElementById('amount_display');
     const $hidden  = document.getElementById('amount');
     const $form    = document.getElementById('payForm');
@@ -275,11 +290,8 @@
     function parseMoney(text) {
         if (!text) return NaN;
         let raw = text.toString().replace(/[^\d,\.\-\,]/g, '');
-        if (raw.includes('.') && raw.includes(',')) {
-            raw = raw.replace(/\./g, '').replace(',', '.');
-        } else if (raw.includes(',') && !raw.includes('.')) {
-            raw = raw.replace(',', '.');
-        }
+        if (raw.includes('.') && raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.');
+        else if (raw.includes(',') && !raw.includes('.')) raw = raw.replace(',', '.');
         const n = parseFloat(raw);
         return isFinite(n) ? n : NaN;
     }
@@ -291,13 +303,8 @@
 
     $display.addEventListener('blur', () => {
         const n = parseMoney($display.value);
-        if (isFinite(n)) {
-            $hidden.value = n.toFixed(2);
-            $display.value = fmt.format(n);
-        } else {
-            $hidden.value = '';
-            $display.value = '';
-        }
+        if (isFinite(n)) { $hidden.value = n.toFixed(2); $display.value = fmt.format(n); }
+        else { $hidden.value = ''; $display.value = ''; }
     });
 
     $display.addEventListener('focus', () => {
@@ -308,13 +315,8 @@
 
     $form.addEventListener('submit', (e) => {
         const n = parseMoney($display.value);
-        if (!isFinite(n) || n <= 0) {
-            e.preventDefault();
-            alert('Introduce un importe válido mayor que 0.');
-            $display.focus();
-        } else {
-            $hidden.value = n.toFixed(2);
-        }
+        if (!isFinite(n) || n <= 0) { e.preventDefault(); alert('Introduce un importe válido mayor que 0.'); $display.focus(); }
+        else { $hidden.value = n.toFixed(2); }
     });
 })();
 </script>

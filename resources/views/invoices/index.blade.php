@@ -75,13 +75,7 @@
                                     <li><a class="dropdown-item" href="#" onclick="copyPublicLink('{{ $publicUrl }}', {{ $i->id }})">Copiar enlace público</a></li>
                                     <li><a class="dropdown-item" href="{{ $publicUrl }}" target="_blank" rel="noopener">Abrir portal del cliente</a></li>
                                 @endif
-                                <li><hr class="dropdown-divider"></li>
-                                <li>
-                                    <form class="d-inline" method="post" action="{{ route('invoices.destroy', $i) }}" onsubmit="return confirm('¿Eliminar factura?')">
-                                        @csrf @method('DELETE')
-                                        <button class="dropdown-item text-danger" type="submit">Eliminar</button>
-                                    </form>
-                                </li>
+                                {{-- Sin eliminar por normativa --}}
                             </ul>
                         </div>
 
@@ -149,11 +143,7 @@ async function copyPublicLink(url, invoiceId) {
             }
         } catch (_) {}
         await navigator.clipboard.writeText(finalUrl);
-        const n = document.createElement('div');
-        n.className = 'alert alert-success mt-2';
-        n.textContent = 'Enlace copiado al portapapeles.';
-        (document.querySelector('.container-xxl') ?? document.body).prepend(n);
-        setTimeout(() => n.remove(), 2000);
+        alert('Enlace copiado al portapapeles.');
     } catch (e) {
         alert('No se pudo copiar el enlace.');
     }

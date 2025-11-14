@@ -12,12 +12,12 @@ use App\Models\NumberSequence;
 use App\Models\Product;
 use App\Models\TaxRate;
 use App\Models\UserSetting;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Database\UniqueConstraintViolationException;
 
 class BudgetController extends Controller
 {
@@ -48,7 +48,7 @@ class BudgetController extends Controller
 
     public function create()
     {
-        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $clients  = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
         $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get();
         $taxRates = TaxRate::forAuthUser()->orderByDesc('is_default')->orderBy('rate')->get();
 
@@ -73,6 +73,7 @@ class BudgetController extends Controller
 
             retry_create:
             try {
+                // Numeración exclusiva para presupuestos
                 $number = NumberSequence::next('budget', $series, $year); // PRES-YYYY-####
                 $sequence = 0;
                 if (preg_match('/^PRES-(\d{4})-(\d{4})$/', $number, $m)) {
@@ -144,7 +145,7 @@ class BudgetController extends Controller
     {
         $budget->load('items');
 
-        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $clients  = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
         $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get();
         $taxRates = TaxRate::forAuthUser()->orderByDesc('is_default')->orderBy('rate')->get();
 
@@ -213,8 +214,8 @@ class BudgetController extends Controller
         $budget->load('client', 'items');
 
         $view = \App\Support\PdfTemplates::budgetView($budget->user_id);
+        $pdf  = Pdf::loadView($view, compact('budget'));
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView($view, compact('budget'));
         return $pdf->download($budget->number . '.pdf');
     }
 
@@ -235,10 +236,10 @@ class BudgetController extends Controller
         $budget->load('client', 'items');
         $company = UserSetting::query()->where('user_id', $budget->user_id)->first();
 
-        $view = \App\Support\PdfTemplates::budgetView($budget->user_id);
-        $pdf = Pdf::loadView($view, compact('budget', 'company'))->output();
+        $view     = \App\Support\PdfTemplates::budgetView($budget->user_id);
+        $pdfBinary = Pdf::loadView($view, compact('budget', 'company'))->output();
 
-        $mailable = new BudgetMail($budget, $pdf);
+        $mailable = new BudgetMail($budget, $pdfBinary);
         $mailable->subject($data['subject'] ?? ('Presupuesto ' . $budget->number));
 
         $mail = Mail::to($data['to']);
@@ -248,5 +249,19 @@ class BudgetController extends Controller
         app()->environment('local') ? $mail->send($mailable) : $mail->queue($mailable);
 
         return back()->with('ok', 'Presupuesto enviado por email.');
+    }
+
+    /** Cambiar estado del presupuesto desde el menú de acciones */
+    public function updateStatus(Request $request, Budget $budget)
+    {
+        $this->authorize('update', $budget);
+
+        $data = $request->validate([
+            'status' => ['required', 'in:draft,sent,accepted,rejected,pending'],
+        ]);
+
+        $budget->update(['status' => $data['status']]);
+
+        return back()->with('ok', 'Estado del presupuesto actualizado.');
     }
 }

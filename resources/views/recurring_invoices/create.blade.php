@@ -216,7 +216,7 @@
         scope.querySelectorAll('.qty,.price,.disc,.tax').forEach(i=> i.addEventListener('input', recalc));
         scope.querySelectorAll('textarea.desc').forEach(t=>{ autosize(t); t.addEventListener('input', ()=>autosize(t)); });
 
-        // Producto → precarga precio/IVA (no toca descripción ya escrita)
+        // Producto → precarga precio/IVA y COPIA la descripción si está vacía
         const sel = scope.querySelector('.prods');
         if(sel){
             sel.addEventListener('change', ()=>{
@@ -227,6 +227,13 @@
                 const taxInput   = scope.querySelector('.tax');
                 if(priceInput) priceInput.value = isFinite(price)? price : 0;
                 if(taxInput)   taxInput.value   = isFinite(tax)?   tax   : 0;
+
+                const desc = scope.querySelector('.desc');
+                const name = (opt && opt.text) ? opt.text.trim() : '';
+                if(desc && name && (!desc.value || desc.value.trim()==='')){
+                    desc.value = name;
+                    desc.dispatchEvent(new Event('input', {bubbles:true})); // autosize
+                }
                 recalc();
             });
         }

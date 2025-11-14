@@ -18,7 +18,7 @@ class GenerateRecurringInvoices extends Command
     public function handle(): int
     {
         $runDate = $this->option('date') ?: now()->toDateString();
-        $userId  = $this->option('user_id'); // opcional, para filtrar por tenant
+        $userId  = $this->option('user_id'); // opcional
 
         $q = RecurringInvoice::query()
             ->where('status', 'active')
@@ -28,28 +28,36 @@ class GenerateRecurringInvoices extends Command
 
         $count = 0;
 
-        $q->chunkById(50, function ($templates) use (&$count) {
+        $q->chunkById(50, function ($templates) use (&$count, $runDate) {
             foreach ($templates as $tpl) {
-                DB::transaction(function () use ($tpl, &$count) {
-                    // Crear cabecera de factura
-                    $number = NumberSequence::next('invoice', $tpl->user_id);
+                DB::transaction(function () use ($tpl, &$count, $runDate) {
+                    $series = 'FAC';
+                    $year   = (int) date('Y', strtotime($runDate));
+
+                    // Numeración FAC-YYYY-####
+                    $number = NumberSequence::next('invoice', $series, $year);
+
+                    $sequence = 0; $parsedYear = $year;
+                    if (preg_match('/^([A-Z]+)-(\d{4})-(\d{4})$/', $number, $m)) {
+                        $parsedYear = (int)($m[2] ?? $year);
+                        $sequence   = (int)($m[3] ?? 0);
+                    }
 
                     $invoice = Invoice::create([
                         'user_id'     => $tpl->user_id,
                         'client_id'   => $tpl->client_id,
                         'number'      => $number,
-                        'sequence'    => (int)substr($number, -4),
-                        'year'        => (int)substr($number, 4, 4),
-                        'date'        => now()->toDateString(),
-                        'due_date'    => now()->addDays(15)->toDateString(),
-                        'currency'    => $tpl->currency,
+                        'sequence'    => $sequence,
+                        'year'        => $parsedYear,
+                        'date'        => $runDate,
+                        'due_date'    => date('Y-m-d', strtotime($runDate.' +15 days')),
+                        'currency'    => $tpl->currency ?? 'EUR',
                         'status'      => 'pending',
                         'public_token'=> Str::random(48),
                         'notes'       => $tpl->public_notes,
                         'terms'       => $tpl->terms,
                     ]);
 
-                    // Items + totales
                     $subtotal=0; $tax_total=0; $total=0; $pos=0;
 
                     foreach ($tpl->items as $it) {
@@ -84,7 +92,7 @@ class GenerateRecurringInvoices extends Command
                     $invoice->update(compact('subtotal','tax_total','total'));
 
                     // actualizar plantilla
-                    $tpl->last_run_date = now()->toDateString();
+                    $tpl->last_run_date   = $runDate;
                     $tpl->last_invoice_id = $invoice->id;
                     $tpl->bumpNextRunDate();
                     $tpl->save();
