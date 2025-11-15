@@ -102,11 +102,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it['tax_rate'];
                 $disc  = (float)($it['discount'] ?? 0);
 
-                $base = $qty * $price;
-                $d = $base * ($disc / 100);
+                $base  = $qty * $price;
+                $d     = $base * ($disc / 100);
                 $after = $base - $d;
-                $tax = $after * ($rate / 100);
-                $line = $after + $tax;
+                $tax   = $after * ($rate / 100);
+                $line  = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -142,7 +142,7 @@ class InvoiceController extends Controller
     {
         $invoice->load('items');
 
-        $clients = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
+        $clients  = Client::query()->where('user_id', auth()->id())->orderBy('name')->get();
         $products = Product::query()->where('user_id', auth()->id())->orderBy('name')->get(['id','name']);
 
         return view('invoices.edit', compact('invoice','clients','products'));
@@ -172,11 +172,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it['tax_rate'];
                 $disc  = (float)($it['discount'] ?? 0);
 
-                $base = $qty * $price;
-                $d = $base * ($disc / 100);
+                $base  = $qty * $price;
+                $d     = $base * ($disc / 100);
                 $after = $base - $d;
-                $tax = $after * ($rate / 100);
-                $line = $after + $tax;
+                $tax   = $after * ($rate / 100);
+                $line  = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -219,7 +219,7 @@ class InvoiceController extends Controller
         $invoice->load('client', 'items', 'payments');
 
         $view = \App\Support\PdfTemplates::invoiceView($invoice->user_id);
-        $pdf = Pdf::loadView($view, compact('invoice'));
+        $pdf  = Pdf::loadView($view, compact('invoice'));
 
         Audit::record('invoice.pdf','invoice',$invoice->id,['number'=>$invoice->number]);
         return $pdf->download($invoice->number . '.pdf');
@@ -315,11 +315,11 @@ class InvoiceController extends Controller
                 $rate  = (float)$it->tax_rate;
                 $disc  = (float)$it->discount;
 
-                $base = $qty * $price;
-                $d = $base * ($disc / 100);
+                $base  = $qty * $price;
+                $d     = $base * ($disc / 100);
                 $after = $base - $d;
-                $tax = $after * ($rate / 100);
-                $line = $after + $tax;
+                $tax   = $after * ($rate / 100);
+                $line  = $after + $tax;
 
                 $subtotal += $after; $tax_total += $tax; $total += $line;
 
@@ -349,12 +349,12 @@ class InvoiceController extends Controller
                 'budget_id'=>$budget->id,'budget_number'=>$budget->number,'invoice_number'=>$invoice->number
             ]);
 
-            // LOG de cumplimiento (art. 9): conversión presupuesto -> factura
+            // Art. 9 (cumplimiento)
             Compliance::log('art. 9', 'CONVERT_BUDGET_TO_INVOICE', 'Convertido presupuesto a factura', [
-                'budget_id'       => $budget->id,
-                'budget_number'   => $budget->number,
-                'invoice_id'      => $invoice->id,
-                'invoice_number'  => $invoice->number,
+                'budget_id'      => $budget->id,
+                'budget_number'  => $budget->number,
+                'invoice_id'     => $invoice->id,
+                'invoice_number' => $invoice->number,
             ], 'invoice', $invoice->id, auth()->id());
 
             return redirect()->route('invoices.show', $invoice)->with('ok', 'Factura creada desde presupuesto.');

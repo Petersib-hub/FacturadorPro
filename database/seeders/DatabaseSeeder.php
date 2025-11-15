@@ -10,7 +10,8 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        User::updateOrCreate(
+        // Usuario base
+        $user = User::updateOrCreate(
             ['email' => 'test@example.com'],
             [
                 'name' => 'Test User',
@@ -25,6 +26,11 @@ class DatabaseSeeder extends Seeder
             DemoSeeder::class,
             \Database\Seeders\ProductSeeder::class,
         ]);
+
+        // Asigna rol admin si existe spatie/permission
+        if (method_exists($user, 'assignRole')) {
+            $user->assignRole('system_admin');
+        }
 
         if (config('verifactu.sandbox.enabled')) {
             $this->call(VerifactuSandboxSeeder::class);

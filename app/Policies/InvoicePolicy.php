@@ -9,7 +9,7 @@ class InvoicePolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return (bool) $user;
     }
 
     public function view(User $user, Invoice $invoice): bool
@@ -19,22 +19,21 @@ class InvoicePolicy
 
     public function create(User $user): bool
     {
-        return true;
+        // permitir crear a cualquier usuario autenticado para desarrollo
+        return (bool) $user;
     }
 
     public function update(User $user, Invoice $invoice): bool
     {
-        // permitir actualizar siempre que sea del usuario (estado independiente)
         return $invoice->user_id === $user->id;
     }
 
     public function delete(User $user, Invoice $invoice): bool
     {
-        // Normativa: no eliminar facturas
+        // normativa: no eliminar facturas
         return false;
     }
 
-    /** Permiso específico para registrar pagos */
     public function pay(User $user, Invoice $invoice): bool
     {
         return $invoice->user_id === $user->id;

@@ -32,6 +32,7 @@ class RolePermissionSeeder extends Seeder
 
         $admin->givePermissionTo(Permission::all());
         $owner->givePermissionTo($perms);
+
         // colaborador (solo lectura + acciones limitadas)
         $collab->givePermissionTo([
             'client.view','product.view',

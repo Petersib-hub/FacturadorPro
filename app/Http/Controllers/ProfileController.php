@@ -8,6 +8,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 use Illuminate\View\View;
 
 class ProfileController extends Controller
@@ -17,9 +19,7 @@ class ProfileController extends Controller
      */
     public function edit(Request $request): View
     {
-        return view('profile.edit', [
-            'user' => $request->user(),
-        ]);
+        return view('profile.edit', ['user' => $request->user()]);
     }
 
     /**
@@ -64,6 +64,30 @@ class ProfileController extends Controller
         $user->save();
 
         return Redirect::route('profile.edit')->with('ok', 'Foto actualizada.');
+    }
+
+    /**
+     * Actualizar contraseña (formulario dedicado).
+     */
+    public function updatePassword(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'current_password' => ['required'],
+            'password'         => ['required','confirmed', Password::min(8)->mixedCase()->numbers()],
+        ], [], [
+            'current_password' => 'contraseña actual',
+            'password'         => 'contraseña nueva',
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($request->input('current_password'), $user->password)) {
+            return Redirect::back()->withErrors(['current_password' => 'La contraseña actual no es correcta.']);
+        }
+
+        $user->forceFill(['password' => $request->input('password')])->save();
+
+        return Redirect::route('profile.edit')->with('ok', 'Contraseña actualizada.');
     }
 
     /**

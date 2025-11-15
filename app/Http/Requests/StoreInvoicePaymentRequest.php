@@ -8,9 +8,8 @@ class StoreInvoicePaymentRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // Si tienes policy con habilidad 'pay', úsala; si no, deja true.
-        $invoice = $this->route('invoice');
-        return $this->user() ? $this->user()->can('pay', $invoice) : false;
+        // El controlador ya hace $this->authorize('pay', $invoice);
+        return true;
     }
 
     /**
@@ -26,16 +25,12 @@ class StoreInvoicePaymentRequest extends FormRequest
 
             // Caso con ambos separadores → asumimos que el punto es miles y la coma decimal (es-ES)
             if (str_contains($val, '.') && str_contains($val, ',')) {
-                // Elimina puntos de miles y cambia coma a punto decimal
                 $val = str_replace('.', '', $val);
                 $val = str_replace(',', '.', $val);
             } else {
                 // Sólo coma → úsala como decimal
                 if (str_contains($val, ',') && !str_contains($val, '.')) {
                     $val = str_replace(',', '.', $val);
-                } else {
-                    // Sólo puntos: ya es decimal en notación en-US
-                    // (nada que hacer)
                 }
             }
         } else {

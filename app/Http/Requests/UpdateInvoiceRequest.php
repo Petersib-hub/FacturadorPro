@@ -8,7 +8,8 @@ class UpdateInvoiceRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->can('invoice.update');
+        // La Policy controla update; aquí no bloqueamos.
+        return true;
     }
 
     public function rules(): array
